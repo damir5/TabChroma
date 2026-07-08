@@ -11,3 +11,8 @@ venv/
 # Claude Code
 .claude/
 *.claude_session
+
+# tab-chroma runtime artifacts (created when running the script from the repo dir)
+config.json
+.state.json
+.paused
