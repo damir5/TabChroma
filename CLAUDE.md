@@ -75,7 +75,7 @@ stdin JSON → process_hook()
      - Resolve theme (static / random / round-robin rotation, per-session pinning)
      - Output bash variable assignments (ACTION, COLOR_R/G/B, TITLE_TEXT, BADGE_TEXT)
      - Atomically save .state.json
-  6. eval the Python output → apply escape sequences to /dev/tty
+  6. eval the Python output → apply escape sequences to $TC_DEV (resolved terminal device)
 ```
 
 ### Key Patterns
@@ -84,7 +84,7 @@ stdin JSON → process_hook()
 
 **`_apply_theme_state`**: Used by CLI commands (`test`, `preview`) only — NOT by `process_hook`. Accepts `theme_file` and `state_name` as positional args via `python3 - "$theme_file" "$state_name" << 'PYEOF'`. Args must be on the **same line** as `python3 -`, before `<< 'PYEOF'`.
 
-**`/dev/tty` writes**: All iTerm2 escape sequences write to `/dev/tty` (not stdout — Claude Code captures hook stdout). Wrapped in `{ printf ...; } 2>/dev/null` to suppress errors when `/dev/tty` is unavailable.
+**Terminal device resolution (`$TC_DEV`)**: All iTerm2 escape sequences write to `$TC_DEV`, not stdout (Claude Code captures hook stdout) and *not* `/dev/tty` directly. Hook subprocesses spawned by Claude Code have **no controlling terminal**, so `/dev/tty` fails with "device not configured" and every color/badge write silently vanishes — the plugin appears healthy (`.state.json` still updates) while nothing is visible. `resolve_output_device()` fixes this by walking up the process tree (`ps -o tty=`/`ppid=`) to the nearest ancestor that owns a real pty (e.g. the `claude` process's `ttysNNN`), falling back to `/dev/tty` for interactive CLI use and `/dev/null` as a harmless no-op. Writes are still wrapped in `{ printf ...; } 2>/dev/null`.
 
 **Hook registration**: Hooks are registered in `~/.claude/settings.json` under the `hooks` key. The installer (`install.sh`) appends to existing catch-all matchers to coexist with other hooks (e.g. peon-ping).
 
