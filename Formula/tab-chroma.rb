@@ -1,10 +1,10 @@
 class TabChroma < Formula
   desc "iTerm2 visual feedback plugin for Claude Code and Codex"
   homepage "https://github.com/damir5/TabChroma"
-  url "https://github.com/JCPetrelli/TabChroma/archive/refs/tags/v1.0.2.tar.gz"
-  sha256 "043b148b218f2a2b9ba30e16dff35d744fa2a29dad6bd089ab1fcbce9f2524da"
+  url "https://github.com/damir5/TabChroma/archive/refs/tags/v1.0.2-codex.1.tar.gz"
+  sha256 "b7d9a5e121cbe9eae779ab48b614de2b9afffb69538e98075644672eb7d96d95"
   license "MIT"
-  version "1.0.2"
+  version "1.0.2-codex.1"
 
   def install
     # Install script and themes to share dir
