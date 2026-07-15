@@ -59,7 +59,7 @@ resolve_output_device() {
   printf '/dev/null'
 }
 
-TC_DEV="$(resolve_output_device)"
+TC_DEV="${TAB_CHROMA_OUTPUT_DEVICE:-$(resolve_output_device)}"
 
 # ─── iTerm2 Output Functions ───────────────────────────────────────────────────
 
@@ -350,11 +350,12 @@ cmd_theme_preview() {
 
 _apply_theme_state() {
   local theme_file="$1" state_name="$2"
-  eval "$(python3 - "$theme_file" "$state_name" << 'PYEOF'
+  eval "$(python3 - "$theme_file" "$state_name" "$CONFIG" << 'PYEOF'
 import json, sys
 
 theme_file = sys.argv[1]
 state_name = sys.argv[2]
+config_file = sys.argv[3]
 
 try:
     theme = json.load(open(theme_file))
@@ -372,6 +373,13 @@ r = state.get("r", 0)
 g = state.get("g", 0)
 b = state.get("b", 0)
 
+try:
+    config = json.load(open(config_file))
+except Exception:
+    config = {}
+do_badge = config.get("features", {}).get("badge", True)
+print(f'DO_BADGE="{str(do_badge).lower()}"')
+
 if action == "reset":
     print('ACTION="reset"')
 else:
@@ -384,10 +392,10 @@ PYEOF
 
   if [ "$ACTION" = "reset" ]; then
     reset_tab_color
-    reset_badge_color
+    [ "$DO_BADGE" = "true" ] && reset_badge_color
   elif [ "$ACTION" = "color" ]; then
     set_tab_color "$COLOR_R" "$COLOR_G" "$COLOR_B"
-    set_badge_color "$COLOR_R" "$COLOR_G" "$COLOR_B"
+    [ "$DO_BADGE" = "true" ] && set_badge_color "$COLOR_R" "$COLOR_G" "$COLOR_B"
   fi
 }
 
@@ -429,17 +437,32 @@ cmd_test() {
   eval "$(python3 - << EOF
 import json
 theme = json.load(open("$theme_file"))
+config = json.load(open("$CONFIG"))
 state_cfg = theme.get("states", {}).get("$state_name", {})
 label = state_cfg.get("label", "$state_name")
-print(f'TITLE_TEXT="◉ $project_name: {label}"')
-print(f'BADGE_TEXT="$project_name\\\\n{label}"')
+features = config.get("features", {})
+do_title = features.get("title", True)
+do_badge = features.get("badge", True)
+title = f"◉ $project_name: {label}" if do_title else ""
+badge = f"$project_name\\n{label}" if do_badge else ""
+print(f'DO_TITLE="{str(do_title).lower()}"')
+print(f'DO_BADGE="{str(do_badge).lower()}"')
+print(f'TITLE_TEXT="{title}"')
+print(f'BADGE_TEXT="{badge}"')
 EOF
   )"
-  [ -n "$TITLE_TEXT" ] && set_tab_title "$TITLE_TEXT"
-  if [ -n "$BADGE_TEXT" ]; then
+  if [ "$DO_TITLE" = "true" ]; then
+    set_tab_title "$TITLE_TEXT"
+  else
+    set_tab_title ""
+  fi
+  if [ "$DO_BADGE" = "true" ]; then
     set_badge "$BADGE_TEXT"
     # Set badge color AFTER text — iTerm2 resets it when badge format changes
     [ "$ACTION" = "color" ] && set_badge_color "$COLOR_R" "$COLOR_G" "$COLOR_B"
+  else
+    set_badge ""
+    reset_badge_color
   fi
 }
 
@@ -783,6 +806,7 @@ EOF
   if [ "$value" = "off" ]; then
     case "$feature" in
       badge) set_badge ""; reset_badge_color;;
+      title) set_tab_title "";;
       color) reset_tab_color;;
     esac
   fi
