@@ -4,7 +4,7 @@
 
 set -e
 
-REPO="JCPetrelli/TabChroma"
+REPO="damir5/TabChroma"
 INSTALL_DIR="$HOME/.claude/hooks/tab-chroma"
 
 # ─── Detect local vs remote install ───────────────────────────────────────────
@@ -66,7 +66,7 @@ fi
 
 chmod +x "$INSTALL_DIR/tab-chroma.sh"
 
-# ─── Delegate to tab-chroma install command ───────────────────────────────────
+# ─── Register Claude Code and Codex hooks ─────────────────────────────────────
 # Pass SOURCE_DIR as SHARE_DIR so cmd_install finds completions correctly
 
 TAB_CHROMA_SHARE="$INSTALL_DIR" TAB_CHROMA_DATA="$INSTALL_DIR" \

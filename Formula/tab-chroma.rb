@@ -1,6 +1,6 @@
 class TabChroma < Formula
-  desc "iTerm2 visual feedback plugin for Claude Code"
-  homepage "https://github.com/JCPetrelli/TabChroma"
+  desc "iTerm2 visual feedback plugin for Claude Code and Codex"
+  homepage "https://github.com/damir5/TabChroma"
   url "https://github.com/JCPetrelli/TabChroma/archive/refs/tags/v1.0.2.tar.gz"
   sha256 "043b148b218f2a2b9ba30e16dff35d744fa2a29dad6bd089ab1fcbce9f2524da"
   license "MIT"
@@ -20,18 +20,17 @@ class TabChroma < Formula
       #!/bin/bash
       export TAB_CHROMA_SHARE="#{share}/tab-chroma"
       export TAB_CHROMA_DATA="$HOME/.claude/hooks/tab-chroma"
-      export TAB_CHROMA_HOOK_CMD="#{bin}/tab-chroma"
+      export TAB_CHROMA_HOOK_CMD="#{HOMEBREW_PREFIX}/bin/tab-chroma"
       exec "#{share}/tab-chroma/tab-chroma.sh" "$@"
     EOS
   end
 
   def caveats
     <<~EOS
-      To register Claude Code hooks, run:
+      To register Claude Code and Codex hooks, run:
         tab-chroma install
 
-      This adds tab-chroma to ~/.claude/settings.json so it activates
-      automatically during Claude Code sessions.
+      This adds tab-chroma to ~/.claude/settings.json and ~/.codex/hooks.json.
 
       To uninstall hooks later:
         tab-chroma uninstall

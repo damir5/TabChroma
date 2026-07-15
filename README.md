@@ -4,11 +4,11 @@
   <img src="docs/assets/presentation.gif" alt="TabChroma demo" />
 </p>
 
-iTerm2 visual feedback plugin for [Claude Code](https://claude.ai/code). Changes your tab color, badge, and title based on what Claude is doing - so you can glance at any tab and know its state at a moment's notice.
+iTerm2 visual feedback for [Claude Code](https://claude.ai/code) and [OpenAI Codex](https://developers.openai.com/codex/). Changes your tab color, badge, and title based on what the agent is doing, so you can glance at any tab and know its state.
 
 | State | Default Color | Meaning |
 |-------|--------------|---------|
-| working | Blue | Claude is processing |
+| working | Blue | The agent is processing |
 | done | Green | Ready for your input |
 | attention | Orange | Needs your attention |
 | permission | Red | Awaiting approval |
@@ -17,9 +17,9 @@ iTerm2 visual feedback plugin for [Claude Code](https://claude.ai/code). Changes
 ## Requirements
 
 - macOS with [iTerm2](https://iterm2.com)
-- [Claude Code](https://claude.ai/code) CLI
+- [Claude Code](https://claude.ai/code) CLI and/or [Codex CLI](https://developers.openai.com/codex/cli/)
 - Python 3 (standard library only)
-- **zsh** - the installer writes the shell alias and `claude()` wrapper to `~/.zshrc`. bash and fish are not supported by the installer; add the following manually to your shell rc file:
+- **zsh** - the installer writes the shell alias and `claude()`/`codex()` reset wrappers to `~/.zshrc`. bash and fish are not supported by the installer; add the relevant wrappers manually to your shell rc file:
 
 ```bash
 # Makes `tab-chroma` available as a command
@@ -30,7 +30,16 @@ alias tab-chroma='~/.claude/hooks/tab-chroma/tab-chroma.sh'
 # after you close the session.
 claude() {
   command claude "$@"
+  local exit_status=$?
   tab-chroma reset > /dev/null 2>&1
+  return "$exit_status"
+}
+
+codex() {
+  command codex "$@"
+  local exit_status=$?
+  tab-chroma reset > /dev/null 2>&1
+  return "$exit_status"
 }
 ```
 
@@ -39,7 +48,7 @@ claude() {
 ### Option 1 - curl (recommended)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/JCPetrelli/TabChroma/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/damir5/TabChroma/main/install.sh | bash
 ```
 
 Reload your shell, then test it:
@@ -51,15 +60,15 @@ tab-chroma test working
 ### Option 2 - Homebrew
 
 ```bash
-brew tap JCPetrelli/tab-chroma https://github.com/JCPetrelli/TabChroma
+brew tap damir5/tabchroma https://github.com/damir5/TabChroma
 brew install tab-chroma
-tab-chroma install   # registers Claude Code hooks
+tab-chroma install   # registers Claude Code and Codex hooks
 ```
 
 ### Option 3 - Manual
 
 ```bash
-git clone https://github.com/JCPetrelli/TabChroma.git
+git clone https://github.com/damir5/TabChroma.git
 cd TabChroma
 bash install.sh
 ```
@@ -73,9 +82,14 @@ tab-chroma update
 ```
 
 This re-runs the installer (or `brew upgrade` for Homebrew installs). Your
-`config.json` and `.state.json` are preserved, and the update takes effect on
-the next Claude Code hook event — no restart needed. You can also re-run the
-curl command from Option 1 at any time.
+`config.json`, `.state.json`, pause state, and custom themes are preserved. Homebrew
+hooks point to its stable `bin/tab-chroma` wrapper, so upgrades do not require
+re-registering hooks. You can also re-run the curl
+command from Option 1 at any time. In Codex, use `/hooks` to trust new or
+changed hook definitions.
+
+Publishing a Homebrew update requires a new release tag and the matching
+archive URL and SHA-256 in the formula; source changes alone are not upgradeable.
 
 ## Usage
 
@@ -104,7 +118,7 @@ TESTING:
   reset                 Reset tab to default color
 
 SETUP:
-  install               Register Claude Code hooks
+  install               Register Claude Code and Codex hooks
   uninstall             Remove hooks and data files
   update                Update tab-chroma to the latest version
 ```
@@ -212,7 +226,7 @@ Create a directory under `~/.claude/hooks/tab-chroma/themes/<name>/` with a `the
 
 ## How It Works
 
-tab-chroma registers itself as a Claude Code hook for these events:
+tab-chroma registers itself in `~/.claude/settings.json` and `~/.codex/hooks.json` for these events:
 
 | Hook | State |
 |------|-------|
@@ -221,22 +235,24 @@ tab-chroma registers itself as a Claude Code hook for these events:
 | `PreToolUse` | working |
 | `PostToolUse` | working - recovers from permission state |
 | `Stop` | done |
-| `Notification` | attention or permission (based on message) |
+| `Notification` | attention or permission (Claude Code only; Codex does not expose this hook) |
 | `PermissionRequest` | permission |
+
+Codex requires new or changed command hooks to be reviewed before they run. Start Codex and use `/hooks` to review and trust the tab-chroma hook entries.
 
 ### Debouncing
 
-If the same state fires more than once within `debounce_seconds` (default: 2s), subsequent updates are skipped. A typical Claude turn with many tool uses would otherwise send dozens of identical escape sequences, causing unnecessary overhead and visual noise. Debouncing means only the first transition to a state triggers a visual update - subsequent identical events within the window are no-ops.
+If the same state fires more than once within `debounce_seconds` (default: 2s), subsequent updates are skipped. A typical agent turn with many tool uses would otherwise send dozens of identical escape sequences, causing unnecessary overhead and visual noise. Debouncing means only the first transition to a state triggers a visual update - subsequent identical events within the window are no-ops.
 
 `permission` and `attention` bypass debouncing entirely and always update immediately, since you never want to miss them.
 
 ### Permission recovery
 
-When Claude needs to use a restricted tool, `PermissionRequest` fires and the tab turns red. Once you approve and the tool runs, `PostToolUse` fires and the tab returns to working (blue) automatically - you don't need to do anything.
+When the agent needs to use a restricted tool, `PermissionRequest` fires and the tab turns red. Once you approve and the tool runs, `PostToolUse` fires and the tab returns to working (blue) automatically.
 
 ### Implementation notes
 
-All escape sequences write to `/dev/tty` (not stdout) so Claude Code's hook runner isn't affected. JSON parsing, debouncing, and theme resolution all run in a single `python3` invocation per hook event to minimize subprocess overhead.
+Hook payloads from Claude Code and Codex use the same fields tab-chroma needs, so both use the same runtime. Escape sequences go to the resolved terminal device rather than stdout, leaving hook output untouched. JSON parsing, debouncing, and theme resolution run in a single `python3` invocation per event.
 
 ## Uninstalling
 
@@ -249,7 +265,7 @@ tab-chroma uninstall
 ```bash
 tab-chroma uninstall
 brew uninstall tab-chroma
-brew untap JCPetrelli/tab-chroma
+brew untap damir5/tabchroma
 ```
 
 ## License

@@ -1,13 +1,17 @@
 #!/bin/bash
-# tab-chroma: iTerm2 visual feedback plugin for Claude Code
-# Changes tab color, badge, and title based on Claude Code hook events
+# tab-chroma: iTerm2 visual feedback plugin for Claude Code and Codex
+# Changes tab color, badge, and title based on agent hook events
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONFIG="$SCRIPT_DIR/config.json"
-STATE="$SCRIPT_DIR/.state.json"
-PAUSED="$SCRIPT_DIR/.paused"
-THEMES_DIR="$SCRIPT_DIR/themes"
-VERSION_FILE="$SCRIPT_DIR/VERSION"
+SHARE_DIR="${TAB_CHROMA_SHARE:-$SCRIPT_DIR}"
+DATA_DIR="${TAB_CHROMA_DATA:-$SCRIPT_DIR}"
+HOOK_CMD="${TAB_CHROMA_HOOK_CMD:-$SCRIPT_DIR/tab-chroma.sh}"
+CONFIG="$DATA_DIR/config.json"
+STATE="$DATA_DIR/.state.json"
+PAUSED="$DATA_DIR/.paused"
+THEMES_DIR="$DATA_DIR/themes"
+BUNDLED_THEMES_DIR="$SHARE_DIR/themes"
+VERSION_FILE="$SHARE_DIR/VERSION"
 
 if [[ -r "$VERSION_FILE" ]]; then
   read -r VERSION < "$VERSION_FILE"
@@ -111,6 +115,7 @@ get_active_theme() {
 # ─── Ensure config exists ──────────────────────────────────────────────────────
 
 ensure_config() {
+  mkdir -p "$DATA_DIR"
   if [ ! -f "$CONFIG" ]; then
     cat > "$CONFIG" << 'EOF'
 {
@@ -140,7 +145,7 @@ EOF
 
 cmd_help() {
   cat << EOF
-tab-chroma v$VERSION — iTerm2 visual feedback for Claude Code
+tab-chroma v$VERSION — iTerm2 visual feedback for Claude Code and Codex
 
 USAGE:
   tab-chroma <command> [args]
@@ -172,7 +177,7 @@ INFO:
   version               Show version
 
 SETUP:
-  install               Register Claude Code hooks
+  install               Register Claude Code and Codex hooks
   uninstall             Remove hooks, completions, and data files
   update                Update tab-chroma to the latest version
 EOF
@@ -243,7 +248,7 @@ cmd_theme_list() {
   python3 - << EOF
 import json, os
 
-themes_dir = "$THEMES_DIR"
+themes_dirs = ["$THEMES_DIR", "$BUNDLED_THEMES_DIR"]
 config_path = "$CONFIG"
 
 try:
@@ -253,10 +258,15 @@ except Exception:
 
 print("installed themes:")
 print("")
-for name in sorted(os.listdir(themes_dir)):
-    theme_path = os.path.join(themes_dir, name, "theme.json")
-    if not os.path.isfile(theme_path):
+themes = {}
+for themes_dir in reversed(themes_dirs):
+    if not os.path.isdir(themes_dir):
         continue
+    for name in os.listdir(themes_dir):
+        theme_path = os.path.join(themes_dir, name, "theme.json")
+        if os.path.isfile(theme_path):
+            themes[name] = theme_path
+for name, theme_path in sorted(themes.items()):
     try:
         t = json.load(open(theme_path))
     except Exception:
@@ -276,7 +286,7 @@ cmd_theme_use() {
     echo "usage: tab-chroma theme use <name>" >&2
     return 1
   fi
-  if [ ! -d "$THEMES_DIR/$name" ]; then
+  if [ ! -f "$THEMES_DIR/$name/theme.json" ] && [ ! -f "$BUNDLED_THEMES_DIR/$name/theme.json" ]; then
     echo "theme not found: $name" >&2
     echo "run 'tab-chroma theme list' to see available themes" >&2
     return 1
@@ -296,13 +306,14 @@ cmd_theme_next() {
   python3 - << EOF
 import json, os
 
-themes_dir = "$THEMES_DIR"
+themes_dirs = ["$THEMES_DIR", "$BUNDLED_THEMES_DIR"]
 config_path = "$CONFIG"
 
-themes = sorted(
-    e for e in os.listdir(themes_dir)
+themes = sorted({
+    e for themes_dir in themes_dirs if os.path.isdir(themes_dir)
+    for e in os.listdir(themes_dir)
     if os.path.isfile(os.path.join(themes_dir, e, "theme.json"))
-)
+})
 config = json.load(open(config_path))
 current = config.get("active_theme", "default")
 if current in themes:
@@ -323,6 +334,7 @@ cmd_theme_preview() {
     name="$(get_active_theme)"
   fi
   local theme_file="$THEMES_DIR/$name/theme.json"
+  [ -f "$theme_file" ] || theme_file="$BUNDLED_THEMES_DIR/$name/theme.json"
   if [ ! -f "$theme_file" ]; then
     echo "theme not found: $name" >&2
     return 1
@@ -402,9 +414,10 @@ cmd_test() {
   local theme_name
   theme_name="$(get_active_theme)"
   local theme_file="$THEMES_DIR/$theme_name/theme.json"
+  [ -f "$theme_file" ] || theme_file="$BUNDLED_THEMES_DIR/$theme_name/theme.json"
 
   if [ ! -f "$theme_file" ]; then
-    theme_file="$THEMES_DIR/default/theme.json"
+    theme_file="$BUNDLED_THEMES_DIR/default/theme.json"
   fi
 
   echo "testing state: $state_name (theme: $theme_name)"
@@ -438,16 +451,21 @@ cmd_reset() {
 }
 
 cmd_install() {
-  local settings="$HOME/.claude/settings.json"
-  local hook_cmd="$SCRIPT_DIR/tab-chroma.sh"
-  local events="SessionStart UserPromptSubmit PreToolUse Stop Notification PermissionRequest"
+  local claude_settings="$HOME/.claude/settings.json"
+  local codex_settings="$HOME/.codex/hooks.json"
+  local hook_cmd="$HOOK_CMD"
+  local common_events="SessionStart UserPromptSubmit PreToolUse PostToolUse Stop PermissionRequest"
 
-  if [ ! -f "$settings" ]; then
-    echo '{}' > "$settings"
-  fi
+  ensure_config
+  mkdir -p "$(dirname "$claude_settings")" "$(dirname "$codex_settings")"
+  [ -f "$claude_settings" ] || echo '{}' > "$claude_settings"
+  [ -f "$codex_settings" ] || echo '{}' > "$codex_settings"
 
-  python3 - "$settings" "$hook_cmd" $events << 'PYEOF'
-import json, sys
+  register_hooks() {
+    local settings="$1"
+    shift
+    python3 - "$settings" "$hook_cmd" "$@" << 'PYEOF'
+import json, re, sys
 
 settings_path, hook_cmd = sys.argv[1], sys.argv[2]
 events = sys.argv[3:]
@@ -457,6 +475,21 @@ with open(settings_path) as f:
 
 cfg.setdefault("hooks", {})
 changed = False
+
+def is_legacy(command):
+    if not isinstance(command, str) or command == hook_cmd:
+        return False
+    return (
+        command.endswith("/.claude/hooks/tab-chroma/tab-chroma.sh")
+        or re.search(r"/(?:Cellar|cellar)/.+/share/tab-chroma/tab-chroma\.sh$", command)
+    )
+
+for matchers in cfg["hooks"].values():
+    for matcher in matchers:
+        hooks = matcher.get("hooks", [])
+        matcher["hooks"] = [h for h in hooks if not is_legacy(h.get("command"))]
+        changed |= len(matcher["hooks"]) != len(hooks)
+
 for event in events:
     matchers = cfg["hooks"].setdefault(event, [{"matcher": "", "hooks": []}])
     # Find the catch-all matcher
@@ -478,34 +511,95 @@ if changed:
 else:
     print("tab-chroma hooks already registered")
 PYEOF
+  }
+
+  register_hooks "$claude_settings" $common_events Notification
+  register_hooks "$codex_settings" $common_events
+  echo "Codex: run /hooks to review and trust the new tab-chroma hooks"
 
   # Set up shell alias and completions
   local zshrc="$HOME/.zshrc"
-  local alias_line="alias tab-chroma='$hook_cmd'"
-  if ! grep -qF "alias tab-chroma=" "$zshrc" 2>/dev/null; then
-    echo "" >> "$zshrc"
-    echo "# tab-chroma" >> "$zshrc"
-    echo "$alias_line" >> "$zshrc"
-    echo "alias added to $zshrc (run: source ~/.zshrc)"
-  fi
+  python3 - "$zshrc" "$hook_cmd" << 'PYEOF'
+import pathlib, re, sys
+
+path, hook_cmd = pathlib.Path(sys.argv[1]), sys.argv[2]
+content = path.read_text() if path.exists() else ""
+pattern = re.compile(r"^alias tab-chroma='([^']*)'$", re.MULTILINE)
+matches = list(pattern.finditer(content))
+
+def is_owned(command):
+    return (
+        command.endswith("/.claude/hooks/tab-chroma/tab-chroma.sh")
+        or re.search(r"/(?:Cellar|cellar)/.+/share/tab-chroma/tab-chroma\.sh$", command)
+    )
+
+if any(is_owned(match.group(1)) for match in matches):
+    content = pattern.sub(
+        lambda match: f"alias tab-chroma='{hook_cmd}'" if is_owned(match.group(1)) else match.group(0),
+        content,
+    )
+elif not matches:
+    content += f"\n# tab-chroma\nalias tab-chroma='{hook_cmd}'\n"
+path.write_text(content)
+PYEOF
 
   # Add claude() wrapper so tab resets when exiting Claude Code (Ctrl+C etc.)
   # Claude Code has no SessionEnd hook, so a shell wrapper is the only way.
   local wrapper_marker="# tab-chroma: reset tab on claude exit"
+  python3 - "$zshrc" << 'PYEOF'
+import pathlib, sys
+
+path = pathlib.Path(sys.argv[1])
+content = path.read_text()
+old = '''# tab-chroma: reset tab on claude exit
+claude() {
+  command claude "$@"
+  tab-chroma reset > /dev/null 2>&1
+}'''
+new = '''# tab-chroma: reset tab on claude exit
+claude() {
+  command claude "$@"
+  local exit_status=$?
+  tab-chroma reset > /dev/null 2>&1
+  return "$exit_status"
+}'''
+path.write_text(content.replace(old, new))
+PYEOF
   if ! grep -qF "$wrapper_marker" "$zshrc" 2>/dev/null; then
     {
       echo ""
       echo "$wrapper_marker"
       echo 'claude() {'
       echo '  command claude "$@"'
+      echo '  local exit_status=$?'
       echo '  tab-chroma reset > /dev/null 2>&1'
+      echo '  return "$exit_status"'
       echo '}'
     } >> "$zshrc"
     echo "claude() wrapper added to $zshrc (run: source ~/.zshrc)"
   fi
 
+  local codex_wrapper_marker="# tab-chroma: reset tab on codex exit"
+  if grep -qF "$codex_wrapper_marker" "$zshrc" 2>/dev/null; then
+    :
+  elif grep -Eq '^[[:space:]]*(function[[:space:]]+)?codex[[:space:]]*(\(\))?[[:space:]]*\{' "$zshrc" 2>/dev/null; then
+    echo "existing codex() function left unchanged; add 'tab-chroma reset' to it manually"
+  else
+    {
+      echo ""
+      echo "$codex_wrapper_marker"
+      echo 'codex() {'
+      echo '  command codex "$@"'
+      echo '  local exit_status=$?'
+      echo '  tab-chroma reset > /dev/null 2>&1'
+      echo '  return "$exit_status"'
+      echo '}'
+    } >> "$zshrc"
+    echo "codex() wrapper added to $zshrc (run: source ~/.zshrc)"
+  fi
+
   local comp_dir="$HOME/.bash_completion.d"
-  local comp_src="$SCRIPT_DIR/completions/tab-chroma.bash"
+  local comp_src="$SHARE_DIR/completions/tab-chroma.bash"
   if [ -f "$comp_src" ]; then
     mkdir -p "$comp_dir"
     cp "$comp_src" "$comp_dir/tab-chroma"
@@ -514,8 +608,10 @@ PYEOF
 }
 
 cmd_uninstall() {
-  local settings="$HOME/.claude/settings.json"
-  local install_dir="$SCRIPT_DIR"
+  local claude_settings="$HOME/.claude/settings.json"
+  local codex_settings="$HOME/.codex/hooks.json"
+  local install_dir="$DATA_DIR"
+  local hook_cmd="$HOOK_CMD"
 
   read -r -p "Remove tab-chroma completely? This will remove all files and hooks. [y/N] " confirm
   if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
@@ -523,31 +619,41 @@ cmd_uninstall() {
     return 0
   fi
 
-  echo "Removing hooks from $settings..."
-  python3 - "$settings" "$install_dir" << 'PYEOF'
-import json, os, sys
-settings_path, install_dir = sys.argv[1], sys.argv[2]
-if not os.path.exists(settings_path):
-    print("  settings.json not found, skipping"); sys.exit(0)
-try:
-    cfg = json.load(open(settings_path))
-except Exception as e:
-    print(f"  error reading settings: {e}"); sys.exit(0)
-changed = False
-for event, entries in cfg.get("hooks", {}).items():
-    for entry in entries:
-        orig = list(entry.get("hooks", []))
-        entry["hooks"] = [h for h in orig if install_dir not in h.get("command", "")]
-        if len(entry["hooks"]) != len(orig):
-            changed = True
-if changed:
-    tmp = settings_path + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(cfg, f, indent=2); f.write("\n")
-    os.replace(tmp, settings_path)
-    print("  Removed tab-chroma hook entries.")
-else:
-    print("  No tab-chroma hooks found in settings.")
+  echo "Removing hooks from Claude Code and Codex settings..."
+  python3 - "$hook_cmd" "$claude_settings" "$codex_settings" << 'PYEOF'
+import json, os, re, sys
+hook_cmd = sys.argv[1]
+
+def is_owned(command):
+    if not isinstance(command, str):
+        return False
+    return (
+        command == hook_cmd
+        or command.endswith("/.claude/hooks/tab-chroma/tab-chroma.sh")
+        or re.search(r"/(?:Cellar|cellar)/.+/share/tab-chroma/tab-chroma\.sh$", command)
+    )
+
+for settings_path in sys.argv[2:]:
+    if not os.path.exists(settings_path):
+        print(f"  {settings_path} not found, skipping"); continue
+    try:
+        cfg = json.load(open(settings_path))
+    except Exception as e:
+        print(f"  error reading {settings_path}: {e}"); continue
+    changed = False
+    for entries in cfg.get("hooks", {}).values():
+        for entry in entries:
+            orig = list(entry.get("hooks", []))
+            entry["hooks"] = [h for h in orig if not is_owned(h.get("command"))]
+            changed |= len(entry["hooks"]) != len(orig)
+    if changed:
+        tmp = settings_path + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(cfg, f, indent=2); f.write("\n")
+        os.replace(tmp, settings_path)
+        print(f"  Removed tab-chroma hooks from {settings_path}.")
+    else:
+        print(f"  No tab-chroma hooks found in {settings_path}.")
 PYEOF
 
   if [ "$TERM_PROGRAM" = "iTerm.app" ]; then
@@ -561,19 +667,38 @@ PYEOF
   rm -f "$HOME/.config/fish/completions/tab-chroma.fish"
 
   echo "Removing shell entries from ~/.zshrc..."
-  python3 - "$HOME/.zshrc" << 'PYEOF'
+  python3 - "$HOME/.zshrc" "$hook_cmd" << 'PYEOF'
 import sys, re
-zshrc = sys.argv[1]
+zshrc, hook_cmd = sys.argv[1:]
 try:
     with open(zshrc) as f:
         content = f.read()
 except FileNotFoundError:
     sys.exit(0)
-# Remove alias block: "# tab-chroma\nalias tab-chroma=..."
-content = re.sub(r'\n# tab-chroma\nalias tab-chroma=.*\n?', '', content)
-# Remove wrapper block (5 lines after marker)
+def is_owned(command):
+    return (
+        command == hook_cmd
+        or command.endswith("/.claude/hooks/tab-chroma/tab-chroma.sh")
+        or re.search(r"/(?:Cellar|cellar)/.+/share/tab-chroma/tab-chroma\.sh$", command)
+    )
+
+# Remove only aliases installed by tab-chroma; preserve custom aliases.
+content = re.sub(
+    r'(^|\n)(?:# tab-chroma\n)?alias tab-chroma=\'([^\']*)\'\n?',
+    lambda match: match.group(1) if is_owned(match.group(2)) else match.group(0),
+    content,
+)
+# Remove wrapper blocks added by cmd_install
+content = re.sub(
+    r'\n# tab-chroma: reset tab on claude exit\nclaude\(\) \{\n  command claude "\$@"\n  local exit_status=\$\?\n  tab-chroma reset > /dev/null 2>&1\n  return "\$exit_status"\n\}\n?',
+    '', content
+)
 content = re.sub(
     r'\n# tab-chroma: reset tab on claude exit\nclaude\(\) \{\n  command claude "\$@"\n  tab-chroma reset > /dev/null 2>&1\n\}\n?',
+    '', content
+)
+content = re.sub(
+    r'\n# tab-chroma: reset tab on codex exit\ncodex\(\) \{\n  command codex "\$@"\n  local exit_status=\$\?\n  tab-chroma reset > /dev/null 2>&1\n  return "\$exit_status"\n\}\n?',
     '', content
 )
 with open(zshrc, 'w') as f:
@@ -582,13 +707,17 @@ print("  Removed tab-chroma entries from ~/.zshrc")
 PYEOF
 
   echo ""
-  echo "Removing $install_dir..."
-  rm -rf "$install_dir"
+  if [ "$install_dir" = "$HOME/.claude/hooks/tab-chroma" ]; then
+    echo "Removing $install_dir..."
+    rm -rf "$install_dir"
+  else
+    echo "Refusing to remove unsafe data directory: $install_dir" >&2
+  fi
   echo "Done. tab-chroma has been uninstalled."
 }
 
 cmd_update() {
-  local repo="JCPetrelli/TabChroma"
+  local repo="damir5/TabChroma"
 
   # Homebrew-managed install: defer to brew so its bookkeeping stays correct.
   if command -v brew >/dev/null 2>&1 && brew list tab-chroma >/dev/null 2>&1; then
@@ -716,6 +845,7 @@ process_hook() {
   TAB_CHROMA_CONFIG="$CONFIG" \
   TAB_CHROMA_STATE="$STATE" \
   TAB_CHROMA_THEMES="$THEMES_DIR" \
+  TAB_CHROMA_BUNDLED_THEMES="$BUNDLED_THEMES_DIR" \
   python3 - << 'PYEOF'
 import sys, json, os, time
 
@@ -723,6 +853,7 @@ input_data = os.environ.get("TAB_CHROMA_INPUT", "")
 config_path = os.environ.get("TAB_CHROMA_CONFIG", "")
 state_path = os.environ.get("TAB_CHROMA_STATE", "")
 themes_dir = os.environ.get("TAB_CHROMA_THEMES", "")
+bundled_themes_dir = os.environ.get("TAB_CHROMA_BUNDLED_THEMES", "")
 
 # --- Parse hook input ---
 try:
@@ -821,7 +952,9 @@ elif session_id and session_id in session_themes:
 # --- Load theme ---
 theme_file = os.path.join(themes_dir, theme_name, "theme.json")
 if not os.path.exists(theme_file):
-    theme_file = os.path.join(themes_dir, "default", "theme.json")
+    theme_file = os.path.join(bundled_themes_dir, theme_name, "theme.json")
+if not os.path.exists(theme_file):
+    theme_file = os.path.join(bundled_themes_dir, "default", "theme.json")
 
 try:
     theme = json.load(open(theme_file))

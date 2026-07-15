@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**tab-chroma** is a Claude Code hook plugin that changes iTerm2 tab colors, badges, and tab titles based on Claude Code hook events (working, done, attention, permission). It is a pure bash + Python 3 plugin with no build step or dependencies beyond the standard library.
+**tab-chroma** is a Claude Code and Codex hook plugin that changes iTerm2 tab colors, badges, and tab titles based on agent hook events (working, done, attention, permission). It is a pure bash + Python 3 plugin with no build step or dependencies beyond the standard library.
 
 ## Locations
 
@@ -21,10 +21,10 @@ Edit `tab-chroma.sh` in the source repo, then run `bash install.sh` to sync to t
 bash install.sh
 
 # Or via curl
-curl -fsSL https://raw.githubusercontent.com/JCPetrelli/TabChroma/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/damir5/TabChroma/main/install.sh | bash
 
 # Or via Homebrew
-brew tap JCPetrelli/tab-chroma https://github.com/JCPetrelli/TabChroma
+brew tap damir5/tabchroma https://github.com/damir5/TabChroma
 brew install tab-chroma
 tab-chroma install
 ```
@@ -86,7 +86,7 @@ stdin JSON → process_hook()
 
 **Terminal device resolution (`$TC_DEV`)**: All iTerm2 escape sequences write to `$TC_DEV`, not stdout (Claude Code captures hook stdout) and *not* `/dev/tty` directly. Hook subprocesses spawned by Claude Code have **no controlling terminal**, so `/dev/tty` fails with "device not configured" and every color/badge write silently vanishes — the plugin appears healthy (`.state.json` still updates) while nothing is visible. `resolve_output_device()` fixes this by walking up the process tree (`ps -o tty=`/`ppid=`) to the nearest ancestor that owns a real pty (e.g. the `claude` process's `ttysNNN`), falling back to `/dev/tty` for interactive CLI use and `/dev/null` as a harmless no-op. Writes are still wrapped in `{ printf ...; } 2>/dev/null`.
 
-**Hook registration**: Hooks are registered in `~/.claude/settings.json` under the `hooks` key. The installer (`install.sh`) appends to existing catch-all matchers to coexist with other hooks (e.g. peon-ping).
+**Hook registration**: Hooks are registered under the `hooks` key in `~/.claude/settings.json` and `~/.codex/hooks.json`. The installer appends to existing catch-all matchers so unrelated hooks remain intact. Codex hooks must be reviewed and trusted with `/hooks`.
 
 ### Event → State Mapping
 

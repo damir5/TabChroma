@@ -3,6 +3,7 @@
 
 INSTALL_DIR="$HOME/.claude/hooks/tab-chroma"
 SETTINGS_FILE="$HOME/.claude/settings.json"
+CODEX_SETTINGS_FILE="$HOME/.codex/hooks.json"
 
 echo "tab-chroma uninstaller"
 echo ""
@@ -19,49 +20,48 @@ if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
   exit 0
 fi
 
-# ─── 1. Remove hooks from settings.json ───────────────────────────────────────
+# ─── 1. Remove hooks from Claude Code and Codex settings ──────────────────────
 
-echo "Removing hooks from $SETTINGS_FILE..."
+echo "Removing Claude Code and Codex hooks..."
 
-python3 - << EOF
-import json, os, sys
+python3 - "$SETTINGS_FILE" "$CODEX_SETTINGS_FILE" "$INSTALL_DIR" << 'PYEOF'
+import json, os, re, sys
 
-settings_path = "$SETTINGS_FILE"
-install_dir = "$INSTALL_DIR"
+install_dir = sys.argv[3]
 
-if not os.path.exists(settings_path):
-    print("  settings.json not found, skipping")
-    sys.exit(0)
+def is_owned(command):
+    if not isinstance(command, str):
+        return False
+    return (
+        command == os.path.join(install_dir, "tab-chroma.sh")
+        or re.search(r"/(?:Cellar|cellar)/.+/share/tab-chroma/tab-chroma\.sh$", command)
+    )
 
-try:
-    settings = json.load(open(settings_path))
-except Exception as e:
-    print(f"  error reading settings: {e}")
-    sys.exit(0)
-
-hooks = settings.get("hooks", {})
-changed = False
-
-for event, entries in hooks.items():
-    for entry in entries:
-        original = list(entry.get("hooks", []))
-        entry["hooks"] = [
-            h for h in original
-            if install_dir not in h.get("command", "")
-        ]
-        if len(entry["hooks"]) != len(original):
-            changed = True
-
-if changed:
-    tmp_path = settings_path + ".tmp"
-    with open(tmp_path, "w") as f:
-        json.dump(settings, f, indent=2)
-        f.write("\n")
-    os.replace(tmp_path, settings_path)
-    print("  Removed tab-chroma hook entries.")
-else:
-    print("  No tab-chroma hooks found in settings.")
-EOF
+for settings_path in sys.argv[1:3]:
+    if not os.path.exists(settings_path):
+        print(f"  {settings_path} not found, skipping")
+        continue
+    try:
+        settings = json.load(open(settings_path))
+    except Exception as e:
+        print(f"  error reading {settings_path}: {e}")
+        continue
+    changed = False
+    for entries in settings.get("hooks", {}).values():
+        for entry in entries:
+            original = list(entry.get("hooks", []))
+            entry["hooks"] = [h for h in original if not is_owned(h.get("command"))]
+            changed |= len(entry["hooks"]) != len(original)
+    if changed:
+        tmp_path = settings_path + ".tmp"
+        with open(tmp_path, "w") as f:
+            json.dump(settings, f, indent=2)
+            f.write("\n")
+        os.replace(tmp_path, settings_path)
+        print(f"  Removed tab-chroma hooks from {settings_path}.")
+    else:
+        print(f"  No tab-chroma hooks found in {settings_path}.")
+PYEOF
 
 # ─── 2. Reset tab color and clear badge ───────────────────────────────────────
 
