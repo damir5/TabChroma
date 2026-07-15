@@ -480,7 +480,8 @@ def is_legacy(command):
     if not isinstance(command, str) or command == hook_cmd:
         return False
     return (
-        command.endswith("/.claude/hooks/tab-chroma/tab-chroma.sh")
+        command in ("/opt/homebrew/bin/tab-chroma", "/usr/local/bin/tab-chroma")
+        or command.endswith("/.claude/hooks/tab-chroma/tab-chroma.sh")
         or re.search(r"/(?:Cellar|cellar)/.+/share/tab-chroma/tab-chroma\.sh$", command)
     )
 
@@ -529,7 +530,8 @@ matches = list(pattern.finditer(content))
 
 def is_owned(command):
     return (
-        command.endswith("/.claude/hooks/tab-chroma/tab-chroma.sh")
+        command in ("/opt/homebrew/bin/tab-chroma", "/usr/local/bin/tab-chroma")
+        or command.endswith("/.claude/hooks/tab-chroma/tab-chroma.sh")
         or re.search(r"/(?:Cellar|cellar)/.+/share/tab-chroma/tab-chroma\.sh$", command)
     )
 
@@ -629,6 +631,7 @@ def is_owned(command):
         return False
     return (
         command == hook_cmd
+        or command in ("/opt/homebrew/bin/tab-chroma", "/usr/local/bin/tab-chroma")
         or command.endswith("/.claude/hooks/tab-chroma/tab-chroma.sh")
         or re.search(r"/(?:Cellar|cellar)/.+/share/tab-chroma/tab-chroma\.sh$", command)
     )
@@ -678,6 +681,7 @@ except FileNotFoundError:
 def is_owned(command):
     return (
         command == hook_cmd
+        or command in ("/opt/homebrew/bin/tab-chroma", "/usr/local/bin/tab-chroma")
         or command.endswith("/.claude/hooks/tab-chroma/tab-chroma.sh")
         or re.search(r"/(?:Cellar|cellar)/.+/share/tab-chroma/tab-chroma\.sh$", command)
     )
@@ -718,6 +722,16 @@ PYEOF
 
 cmd_update() {
   local repo="damir5/TabChroma"
+
+  if [ -e "$SHARE_DIR/.git" ]; then
+    if ! command -v git >/dev/null 2>&1; then
+      echo "error: git is required to update this checkout" >&2
+      return 1
+    fi
+    echo "Updating local checkout with git pull --ff-only..."
+    git -C "$SHARE_DIR" pull --ff-only origin main
+    return $?
+  fi
 
   # Homebrew-managed install: defer to brew so its bookkeeping stays correct.
   if command -v brew >/dev/null 2>&1 && brew list tab-chroma >/dev/null 2>&1; then

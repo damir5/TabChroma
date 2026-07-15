@@ -93,6 +93,84 @@ assert "# tab-chroma: reset tab on codex exit" not in zshrc
 assert not (home / ".claude/hooks/tab-chroma").exists()
 PY
 
+# A ~/bin link uses checkout assets and migrates only installer-owned Brew paths.
+HOME="$TMP_ROOT/local-link-home"
+export HOME
+LOCAL_CMD="$HOME/bin/tab-chroma"
+mkdir -p "$HOME/bin" "$HOME/.claude" "$HOME/.codex"
+ln -s "$ROOT/tab-chroma" "$LOCAL_CMD"
+python3 - "$HOME" <<'PY'
+import json, pathlib, sys
+
+home = pathlib.Path(sys.argv[1])
+config = {"hooks": {"SessionStart": [{"matcher": "", "hooks": [
+    {"type": "command", "command": "/opt/homebrew/bin/tab-chroma"},
+    {"type": "command", "command": "/usr/local/bin/tab-chroma"},
+    {"type": "command", "command": "/custom/bin/tab-chroma"},
+]}]}}
+for path in (home / ".claude/settings.json", home / ".codex/hooks.json"):
+    path.write_text(json.dumps(config))
+PY
+printf '%s\n' \
+  '# tab-chroma' \
+  "alias tab-chroma='/opt/homebrew/bin/tab-chroma'" \
+  "alias tab-chroma='/custom/bin/tab-chroma'" > "$HOME/.zshrc"
+
+TERM_PROGRAM=unsupported "$LOCAL_CMD" install >/dev/null
+python3 - "$HOME" "$LOCAL_CMD" "$ROOT" <<'PY'
+import json, pathlib, sys
+
+home, local_cmd, root = pathlib.Path(sys.argv[1]), sys.argv[2], pathlib.Path(sys.argv[3])
+for path in (home / ".claude/settings.json", home / ".codex/hooks.json"):
+    config = json.loads(path.read_text())
+    commands = [
+        hook["command"]
+        for groups in config["hooks"].values()
+        for group in groups
+        for hook in group["hooks"]
+    ]
+    assert local_cmd in commands
+    assert "/custom/bin/tab-chroma" in commands
+    assert "/opt/homebrew/bin/tab-chroma" not in commands
+    assert "/usr/local/bin/tab-chroma" not in commands
+zshrc = (home / ".zshrc").read_text()
+assert f"alias tab-chroma='{local_cmd}'" in zshrc
+assert "alias tab-chroma='/custom/bin/tab-chroma'" in zshrc
+assert "/opt/homebrew/bin/tab-chroma" not in zshrc
+assert (home / ".claude/hooks/tab-chroma/config.json").exists()
+assert local_cmd != str(root / "tab-chroma")
+PY
+mkdir -p "$TMP_ROOT/fake-bin"
+printf '%s\n' '#!/bin/bash' 'printf '\''%s\n'\'' "$@" > "$GIT_ARGS"' > "$TMP_ROOT/fake-bin/git"
+chmod +x "$TMP_ROOT/fake-bin/git"
+GIT_ARGS="$TMP_ROOT/git-args" PATH="$TMP_ROOT/fake-bin:$PATH" \
+  TERM_PROGRAM=unsupported "$LOCAL_CMD" update >/dev/null
+python3 - "$TMP_ROOT/git-args" "$ROOT" <<'PY'
+import pathlib, sys
+
+assert pathlib.Path(sys.argv[1]).read_text().splitlines() == [
+    "-C", sys.argv[2], "pull", "--ff-only", "origin", "main"
+]
+PY
+printf 'y\n' | TERM_PROGRAM=unsupported "$LOCAL_CMD" uninstall >/dev/null
+python3 - "$HOME" <<'PY'
+import json, pathlib, sys
+
+home = pathlib.Path(sys.argv[1])
+for path in (home / ".claude/settings.json", home / ".codex/hooks.json"):
+    config = json.loads(path.read_text())
+    commands = [
+        hook["command"]
+        for groups in config["hooks"].values()
+        for group in groups
+        for hook in group["hooks"]
+    ]
+    assert commands == ["/custom/bin/tab-chroma"]
+assert "alias tab-chroma='/custom/bin/tab-chroma'" in (home / ".zshrc").read_text()
+assert not (home / ".claude/hooks/tab-chroma").exists()
+assert (home / "bin/tab-chroma").is_symlink()
+PY
+
 # Homebrew upgrades replace versioned assets while hooks keep calling one stable wrapper.
 HOME="$TMP_ROOT/brew-home"
 export HOME

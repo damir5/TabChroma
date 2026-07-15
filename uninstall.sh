@@ -34,6 +34,7 @@ def is_owned(command):
         return False
     return (
         command == os.path.join(install_dir, "tab-chroma.sh")
+        or command in ("/opt/homebrew/bin/tab-chroma", "/usr/local/bin/tab-chroma")
         or re.search(r"/(?:Cellar|cellar)/.+/share/tab-chroma/tab-chroma\.sh$", command)
     )
 

@@ -1,0 +1,14 @@
+#!/bin/bash
+
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SHARE="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+
+export TAB_CHROMA_SHARE="$SHARE"
+export TAB_CHROMA_DATA="$HOME/.claude/hooks/tab-chroma"
+export TAB_CHROMA_HOOK_CMD="$HOME/bin/tab-chroma"
+exec "$SHARE/tab-chroma.sh" "$@"
